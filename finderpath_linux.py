@@ -333,6 +333,7 @@ def copy_to_clipboard(text: str) -> str | None:
         ("xclip", "-selection", "clipboard"),
         ("xsel", "--clipboard", "--input"),
     )
+    failures: list[str] = []
 
     for command in commands:
         if not shutil.which(command[0]):
@@ -348,7 +349,10 @@ def copy_to_clipboard(text: str) -> str | None:
             )
             return None
         except (OSError, subprocess.CalledProcessError) as error:
-            return f"Could not write to clipboard with {command[0]}: {error}"
+            failures.append(f"{command[0]}: {error}")
+
+    if failures:
+        return "Could not write to the clipboard. Tried " + "; ".join(failures)
 
     return "No clipboard helper found. Install wl-clipboard, xclip, or xsel."
 
@@ -660,6 +664,12 @@ def action_connect(args: argparse.Namespace) -> int:
 
 class TrayApp:
     def __init__(self, preferred_terminal: str | None = None) -> None:
+        if not has_graphical_display():
+            raise RuntimeError(
+                "No graphical display session found. Start FinderPath Linux from your desktop session "
+                "or set DISPLAY/WAYLAND_DISPLAY before running the tray."
+            )
+
         try:
             import gi  # type: ignore
         except ImportError as error:
@@ -802,12 +812,20 @@ def action_tray(args: argparse.Namespace) -> int:
         return 1
 
 
+def has_graphical_display(env: Mapping[str, str] | None = None) -> bool:
+    current_env = env or os.environ
+    return bool(current_env.get("DISPLAY") or current_env.get("WAYLAND_DISPLAY"))
+
+
 def run_self_test() -> int:
     assert parse_file_uri("file:///tmp/hello%20there") == "/tmp/hello there"
     assert parse_file_uri("https://example.com/nope") is None
     assert cd_command("/tmp/it's ok") == "cd '/tmp/it'\"'\"'s ok'"
     assert cd_command('/tmp/a"$b', "double") == 'cd "/tmp/a\\"\\$b"'
     assert path_from_dbus_output("file:///tmp/example") == "/tmp/example"
+    assert has_graphical_display({"DISPLAY": ":0"})
+    assert has_graphical_display({"WAYLAND_DISPLAY": "wayland-0"})
+    assert not has_graphical_display({})
 
     with tempfile.TemporaryDirectory() as tmp:
         folder = Path(tmp)

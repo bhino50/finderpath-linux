@@ -89,6 +89,8 @@ finderpath-linux tray
 
 If the tray command says GTK/AppIndicator packages are missing, install the tray dependencies listed above or keep using the CLI/file-manager actions.
 
+The tray app must be started from a graphical desktop session. A plain SSH shell without `DISPLAY` or `WAYLAND_DISPLAY` can still run the CLI and installer tests, but it cannot show the tray.
+
 ## Usage
 
 ```bash
@@ -145,7 +147,7 @@ bash -n uninstall.sh
 ## Notes
 
 - Clipboard actions require one of `wl-copy`, `xclip`, or `xsel`.
-- The tray command exits with a clear error if GTK/AppIndicator packages are missing.
+- The tray command exits with a clear error if GTK/AppIndicator packages or a graphical display session are missing.
 - The launcher icon is installed from `assets/finderpath-linux-icon.png`.
 - SSH rejects hosts that start with `-` to avoid option injection.
 - This repo is Linux-only. The macOS Swift/AppKit app lives in the separate FinderPath macOS repository.
