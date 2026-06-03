@@ -20,16 +20,25 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Mapping, Sequence
+from typing import Any, Callable, Mapping, Sequence
 from urllib.parse import unquote, urlparse
 
 
 APP_ID = "io.github.bhino50.FinderPathLinux"
 APP_NAME = "FinderPath Linux"
+CONFIG_DIR = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "finderpath-linux"
+CONFIG_PATH = CONFIG_DIR / "config.json"
 DEFAULT_AGENTS = {
     "codex": "codex",
     "claude": "claude",
     "hermes": "hermes",
+}
+DEFAULT_CONFIG = {
+    "terminal": "",
+    "cd_quote_style": "single",
+    "codex_executable": "codex",
+    "claude_executable": "claude",
+    "hermes_executable": "hermes",
 }
 
 
@@ -64,6 +73,51 @@ class TailscaleStatus:
 
 
 TAILSCALE_UNAVAILABLE = TailscaleStatus("unavailable", None, ())
+
+
+def load_config() -> dict[str, str]:
+    config = dict(DEFAULT_CONFIG)
+    try:
+        payload = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return config
+
+    if not isinstance(payload, dict):
+        return config
+
+    for key, default in DEFAULT_CONFIG.items():
+        value = payload.get(key)
+        if isinstance(value, str):
+            config[key] = value.strip()
+        else:
+            config[key] = default
+
+    if config["cd_quote_style"] not in {"single", "double"}:
+        config["cd_quote_style"] = DEFAULT_CONFIG["cd_quote_style"]
+
+    return config
+
+
+def save_config(config: Mapping[str, str]) -> None:
+    sanitized = dict(DEFAULT_CONFIG)
+    for key in DEFAULT_CONFIG:
+        value = config.get(key, DEFAULT_CONFIG[key])
+        sanitized[key] = value.strip() if isinstance(value, str) else DEFAULT_CONFIG[key]
+
+    if sanitized["cd_quote_style"] not in {"single", "double"}:
+        sanitized["cd_quote_style"] = DEFAULT_CONFIG["cd_quote_style"]
+
+    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH.write_text(json.dumps(sanitized, indent=2) + "\n", encoding="utf-8")
+
+
+def configured_agent_executable(agent: str, override: str | None = None) -> str:
+    if override and override.strip():
+        return override.strip()
+
+    config = load_config()
+    key = f"{agent}_executable"
+    return config.get(key) or DEFAULT_AGENTS[agent]
 
 
 def run_text(args: Sequence[str], timeout: float = 2.5) -> str | None:
@@ -181,6 +235,10 @@ def current_path(explicit_path: str | None = None, env: Mapping[str, str] | None
     if from_env:
         return from_env
 
+    nautilus_path = active_nautilus_path()
+    if nautilus_path:
+        return nautilus_path
+
     dolphin_path = active_dolphin_path()
     if dolphin_path:
         return dolphin_path
@@ -190,6 +248,116 @@ def current_path(explicit_path: str | None = None, env: Mapping[str, str] | None
         return active_cwd
 
     return PathResult(str(Path.cwd()), "current working directory")
+
+
+def active_nautilus_path() -> PathResult | None:
+    if not has_graphical_display():
+        return None
+
+    try:
+        import pyatspi  # type: ignore
+    except ImportError:
+        return None
+
+    try:
+        desktop = pyatspi.Registry.getDesktop(0)
+    except Exception:
+        return None
+
+    for index in range(accessible_child_count(desktop)):
+        app = accessible_child(desktop, index)
+        if app is None:
+            continue
+        app_name = accessible_name(app).lower()
+        if "nautilus" not in app_name and "files" not in app_name:
+            continue
+
+        path = path_from_nautilus_accessible(app)
+        if path:
+            return PathResult(path, "Nautilus accessibility")
+
+    return None
+
+
+def path_from_nautilus_accessible(root: Any) -> str | None:
+    names: list[str] = []
+    collect_accessible_names(root, names, limit=700)
+    path = nautilus_breadcrumb_path(names)
+    return normalize_path(path) if path else None
+
+
+def collect_accessible_names(node: Any, names: list[str], limit: int) -> None:
+    if len(names) >= limit:
+        return
+
+    name = accessible_name(node)
+    if name:
+        names.append(name)
+
+    for index in range(min(accessible_child_count(node), 80)):
+        child = accessible_child(node, index)
+        if child is not None:
+            collect_accessible_names(child, names, limit)
+        if len(names) >= limit:
+            return
+
+
+def nautilus_breadcrumb_path(names: Sequence[str]) -> str | None:
+    try:
+        menu_index = list(names).index("Current Folder Menu")
+    except ValueError:
+        return None
+
+    window = list(names[max(0, menu_index - 50):menu_index])
+    tokens: list[str] = []
+    for name in window:
+        cleaned = name.strip()
+        if cleaned and (not tokens or tokens[-1] != cleaned):
+            tokens.append(cleaned)
+
+    last_navigation_index = -1
+    for marker in ("Back", "Forward"):
+        if marker in tokens:
+            last_navigation_index = max(last_navigation_index, len(tokens) - 1 - tokens[::-1].index(marker))
+
+    tokens = tokens[last_navigation_index + 1:]
+    tokens = [token for token in tokens if token not in {"Back", "Forward"}]
+    if not tokens:
+        return None
+
+    if "Home" in tokens:
+        start = len(tokens) - 1 - tokens[::-1].index("Home")
+        components = [token for token in tokens[start + 1:] if token != "/"]
+        return str(Path.home().joinpath(*components))
+
+    if "/" in tokens:
+        start = tokens.index("/")
+        components = [token for token in tokens[start + 1:] if token != "/"]
+        return str(Path("/").joinpath(*components))
+
+    return None
+
+
+def accessible_name(node: Any) -> str:
+    try:
+        name = node.name
+    except Exception:
+        return ""
+    return name if isinstance(name, str) else ""
+
+
+def accessible_child_count(node: Any) -> int:
+    try:
+        return int(node.childCount)
+    except Exception:
+        return 0
+
+
+def accessible_child(node: Any, index: int) -> Any | None:
+    try:
+        return node.getChildAtIndex(index)
+    except Exception:
+        return None
 
 
 def active_window_pid() -> int | None:
@@ -328,11 +496,24 @@ def cd_command(path: str, quote_style: str = "single") -> str:
 
 
 def copy_to_clipboard(text: str) -> str | None:
-    commands: tuple[tuple[str, ...], ...] = (
-        ("wl-copy",),
-        ("xclip", "-selection", "clipboard"),
-        ("xsel", "--clipboard", "--input"),
-    )
+    commands: list[tuple[str, ...]] = []
+    if os.environ.get("WAYLAND_DISPLAY"):
+        commands.append(("wl-copy",))
+    if os.environ.get("DISPLAY"):
+        commands.extend(
+            [
+                ("xclip", "-selection", "clipboard"),
+                ("xsel", "--clipboard", "--input"),
+            ]
+        )
+    if not commands:
+        commands.extend(
+            [
+                ("wl-copy",),
+                ("xclip", "-selection", "clipboard"),
+                ("xsel", "--clipboard", "--input"),
+            ]
+        )
     failures: list[str] = []
 
     for command in commands:
@@ -346,8 +527,11 @@ def copy_to_clipboard(text: str) -> str | None:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
                 text=True,
+                timeout=3,
             )
             return None
+        except subprocess.TimeoutExpired:
+            failures.append(f"{command[0]}: timed out")
         except (OSError, subprocess.CalledProcessError) as error:
             failures.append(f"{command[0]}: {error}")
 
@@ -377,7 +561,8 @@ def executable_for(command: str) -> str | None:
 
 def terminal_executable(preferred: str | None = None) -> str | None:
     candidates: list[str] = []
-    for value in (preferred, os.environ.get("FINDERPATH_TERMINAL")):
+    config = load_config()
+    for value in (preferred, os.environ.get("FINDERPATH_TERMINAL"), config.get("terminal")):
         if value:
             candidates.append(value)
 
@@ -594,7 +779,8 @@ def action_copy_path(args: argparse.Namespace) -> int:
 
 def action_copy_cd(args: argparse.Namespace) -> int:
     result = current_path(args.path)
-    command = cd_command(result.path, args.quote_style)
+    quote_style = args.quote_style or load_config()["cd_quote_style"]
+    command = cd_command(result.path, quote_style)
     error = copy_to_clipboard(command)
     if error:
         print(error, file=sys.stderr)
@@ -641,7 +827,7 @@ def action_open_cmux(args: argparse.Namespace) -> int:
 
 def action_open_agent(args: argparse.Namespace) -> int:
     agent = args.agent
-    executable = args.executable or DEFAULT_AGENTS[agent]
+    executable = configured_agent_executable(agent, args.executable)
     result = current_path(args.path)
     error = open_agent(agent, executable, result.path, args.terminal)
     if error:
@@ -659,6 +845,152 @@ def action_connect(args: argparse.Namespace) -> int:
         notify(APP_NAME, error)
         return 1
 
+    return 0
+
+
+class SettingsWindow:
+    def __init__(self, on_save: Callable[[], None] | None = None, quit_on_destroy: bool = False) -> None:
+        if not has_graphical_display():
+            raise RuntimeError(
+                "No graphical display session found. Start settings from your desktop session "
+                "or set DISPLAY/WAYLAND_DISPLAY before running it."
+            )
+
+        try:
+            import gi  # type: ignore
+        except ImportError as error:
+            raise RuntimeError("GTK settings support is not installed. Install python3-gi.") from error
+
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk  # type: ignore
+
+        self.Gtk = Gtk
+        self.on_save = on_save
+        self.quit_on_destroy = quit_on_destroy
+        self.entries: dict[str, Any] = {}
+        self.quote_combo: Any | None = None
+        self.window = Gtk.Window(title=f"{APP_NAME} Settings")
+        self.window.set_icon_name(APP_ID)
+        self.window.set_default_size(520, 360)
+        self.window.set_border_width(18)
+        self.window.connect("destroy", self.on_destroy)
+        self.build()
+
+    def build(self) -> None:
+        Gtk = self.Gtk
+        config = load_config()
+
+        root = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=16)
+        self.window.add(root)
+
+        heading = Gtk.Label(label="FinderPath Linux Settings")
+        heading.set_xalign(0)
+        heading.get_style_context().add_class("title")
+        root.pack_start(heading, False, False, 0)
+
+        grid = Gtk.Grid(column_spacing=14, row_spacing=12)
+        root.pack_start(grid, True, True, 0)
+
+        self.add_entry_row(grid, 0, "Terminal", "terminal", config["terminal"], "auto-detect")
+        self.add_quote_row(grid, 1, config["cd_quote_style"])
+        self.add_entry_row(grid, 2, "Codex executable", "codex_executable", config["codex_executable"], "codex")
+        self.add_entry_row(grid, 3, "Claude executable", "claude_executable", config["claude_executable"], "claude")
+        self.add_entry_row(grid, 4, "Hermes executable", "hermes_executable", config["hermes_executable"], "hermes")
+
+        config_label = Gtk.Label(label=f"Config: {CONFIG_PATH}")
+        config_label.set_xalign(0)
+        config_label.set_selectable(True)
+        root.pack_start(config_label, False, False, 0)
+
+        buttons = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=8)
+        buttons.set_halign(Gtk.Align.END)
+        root.pack_start(buttons, False, False, 0)
+
+        reset = Gtk.Button(label="Reset")
+        reset.connect("clicked", lambda _button: self.reset_to_defaults())
+        buttons.pack_start(reset, False, False, 0)
+
+        cancel = Gtk.Button(label="Cancel")
+        cancel.connect("clicked", lambda _button: self.window.destroy())
+        buttons.pack_start(cancel, False, False, 0)
+
+        save = Gtk.Button(label="Save")
+        save.get_style_context().add_class("suggested-action")
+        save.connect("clicked", lambda _button: self.save())
+        buttons.pack_start(save, False, False, 0)
+
+    def add_entry_row(
+        self,
+        grid: object,
+        row: int,
+        label_text: str,
+        key: str,
+        value: str,
+        placeholder: str,
+    ) -> None:
+        Gtk = self.Gtk
+        label = Gtk.Label(label=label_text)
+        label.set_xalign(0)
+        grid.attach(label, 0, row, 1, 1)
+
+        entry = Gtk.Entry()
+        entry.set_hexpand(True)
+        entry.set_text(value)
+        entry.set_placeholder_text(placeholder)
+        grid.attach(entry, 1, row, 1, 1)
+        self.entries[key] = entry
+
+    def add_quote_row(self, grid: object, row: int, value: str) -> None:
+        Gtk = self.Gtk
+        label = Gtk.Label(label="cd command quotes")
+        label.set_xalign(0)
+        grid.attach(label, 0, row, 1, 1)
+
+        combo = Gtk.ComboBoxText()
+        combo.append("single", "Single quotes")
+        combo.append("double", "Double quotes")
+        combo.set_active_id(value if value in {"single", "double"} else DEFAULT_CONFIG["cd_quote_style"])
+        grid.attach(combo, 1, row, 1, 1)
+        self.quote_combo = combo
+
+    def reset_to_defaults(self) -> None:
+        for key, entry in self.entries.items():
+            entry.set_text(DEFAULT_CONFIG[key])
+        if self.quote_combo is not None:
+            self.quote_combo.set_active_id(DEFAULT_CONFIG["cd_quote_style"])
+
+    def save(self) -> None:
+        config = {key: entry.get_text() for key, entry in self.entries.items()}
+        quote_style = self.quote_combo.get_active_id() if self.quote_combo is not None else None
+        config["cd_quote_style"] = quote_style or DEFAULT_CONFIG["cd_quote_style"]
+        save_config(config)
+        notify(APP_NAME, "Settings saved")
+        if self.on_save:
+            self.on_save()
+        self.window.destroy()
+
+    def on_destroy(self, *_args: object) -> None:
+        if self.quit_on_destroy:
+            self.Gtk.main_quit()
+
+    def show(self) -> None:
+        self.window.show_all()
+        self.window.present()
+
+
+def show_settings_window(on_save: Callable[[], None] | None = None, run_main: bool = False) -> None:
+    settings = SettingsWindow(on_save=on_save, quit_on_destroy=run_main)
+    settings.show()
+    if run_main:
+        settings.Gtk.main()
+
+
+def action_settings(_args: argparse.Namespace) -> int:
+    try:
+        show_settings_window(run_main=True)
+    except RuntimeError as error:
+        print(error, file=sys.stderr)
+        return 1
     return 0
 
 
@@ -689,7 +1021,8 @@ class TrayApp:
 
         self.Gtk = Gtk
         self.AppIndicator3 = AppIndicator3
-        self.preferred_terminal = preferred_terminal
+        self.terminal_override = preferred_terminal
+        self.config = load_config()
         self.indicator = AppIndicator3.Indicator.new(
             APP_ID,
             APP_ID,
@@ -704,6 +1037,7 @@ class TrayApp:
 
     def rebuild_menu(self) -> None:
         Gtk = self.Gtk
+        self.config = load_config()
         menu = Gtk.Menu()
         path_result = current_path()
 
@@ -720,18 +1054,19 @@ class TrayApp:
         self.append_item(menu, "Copy cd Command", lambda: self.copy_cd(path_result.path))
         menu.append(Gtk.SeparatorMenuItem())
 
-        self.append_item(menu, "Open in Terminal", lambda: self.run_action(open_terminal_at(path_result.path, self.preferred_terminal)))
+        self.append_item(menu, "Open in Terminal", lambda: self.run_action(open_terminal_at(path_result.path, self.terminal_override)))
         self.append_item(menu, "Open in Ghostty", lambda: self.run_action(open_ghostty_at(path_result.path)), executable="ghostty")
         self.append_item(menu, "Open in cmux", lambda: self.run_action(open_cmux_at(path_result.path)), executable="cmux")
         menu.append(Gtk.SeparatorMenuItem())
 
-        for agent, executable in DEFAULT_AGENTS.items():
+        for agent in DEFAULT_AGENTS:
+            executable = configured_agent_executable(agent)
             label = f"Open with {agent.capitalize()}"
             self.append_item(
                 menu,
                 label,
                 lambda agent=agent, executable=executable: self.run_action(
-                    open_agent(agent, executable, path_result.path, self.preferred_terminal)
+                    open_agent(agent, executable, path_result.path, self.terminal_override)
                 ),
                 executable=executable,
             )
@@ -739,6 +1074,7 @@ class TrayApp:
         menu.append(Gtk.SeparatorMenuItem())
         self.append_tailscale_menu(menu)
         menu.append(Gtk.SeparatorMenuItem())
+        self.append_item(menu, "Settings...", lambda: show_settings_window(on_save=self.rebuild_menu))
         self.append_item(menu, "Quit", Gtk.main_quit)
 
         menu.show_all()
@@ -780,7 +1116,7 @@ class TrayApp:
                     continue
                 label = f"{device.name} ({device.os_name})"
                 item = Gtk.MenuItem(label=label)
-                item.connect("activate", lambda _item, name=device.name: self.run_action(open_ssh(name, self.preferred_terminal)))
+                item.connect("activate", lambda _item, name=device.name: self.run_action(open_ssh(name, self.terminal_override)))
                 submenu.append(item)
 
         submenu_root.set_submenu(submenu)
@@ -793,7 +1129,7 @@ class TrayApp:
             notify(APP_NAME, "Copied path")
 
     def copy_cd(self, path: str) -> None:
-        error = copy_to_clipboard(cd_command(path))
+        error = copy_to_clipboard(cd_command(path, self.config["cd_quote_style"]))
         self.run_action(error)
         if not error:
             notify(APP_NAME, "Copied cd command")
@@ -823,6 +1159,14 @@ def run_self_test() -> int:
     assert cd_command("/tmp/it's ok") == "cd '/tmp/it'\"'\"'s ok'"
     assert cd_command('/tmp/a"$b', "double") == 'cd "/tmp/a\\"\\$b"'
     assert path_from_dbus_output("file:///tmp/example") == "/tmp/example"
+    assert (
+        nautilus_breadcrumb_path(["Back", "Forward", "Home", "/", "Backups", "/", "mac-projects", "Current Folder Menu"])
+        == str(Path.home() / "Backups" / "mac-projects")
+    )
+    assert (
+        nautilus_breadcrumb_path(["Back", "Forward", "/", "var", "/", "log", "Current Folder Menu"])
+        == "/var/log"
+    )
     assert has_graphical_display({"DISPLAY": ":0"})
     assert has_graphical_display({"WAYLAND_DISPLAY": "wayland-0"})
     assert not has_graphical_display({})
@@ -859,7 +1203,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     copy_cd_parser = subparsers.add_parser("copy-cd", help="Copy a shell-safe cd command.")
     add_path_argument(copy_cd_parser)
-    copy_cd_parser.add_argument("--quote-style", choices=("single", "double"), default="single")
+    copy_cd_parser.add_argument("--quote-style", choices=("single", "double"), default=None)
 
     terminal_parser = subparsers.add_parser("open-terminal", help="Open a terminal at the detected path.")
     add_path_argument(terminal_parser)
@@ -890,6 +1234,8 @@ def build_parser() -> argparse.ArgumentParser:
     tray_parser = subparsers.add_parser("tray", help="Run the optional GTK/AppIndicator tray app.")
     tray_parser.add_argument("--terminal", help="Preferred terminal executable.")
 
+    subparsers.add_parser("settings", help="Open the GTK settings window.")
+
     return parser
 
 
@@ -902,7 +1248,13 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     command = args.command
     if command is None:
-        command = "tray" if (os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY")) else "path"
+        if os.environ.get("DISPLAY") or os.environ.get("WAYLAND_DISPLAY"):
+            command = "tray"
+            args.terminal = None
+        else:
+            command = "path"
+            args.path = None
+            args.source = False
 
     if command == "path":
         result = current_path(args.path)
@@ -929,6 +1281,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return action_connect(args)
     if command == "tray":
         return action_tray(args)
+    if command == "settings":
+        return action_settings(args)
 
     parser.error(f"unknown command: {command}")
     return 2

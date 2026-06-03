@@ -6,14 +6,15 @@ The app is dependency-light by design. CLI and file-manager actions use only Pyt
 
 ## Features
 
-- Detect a path from `--path`, file-manager script environment variables, Dolphin D-Bus, active terminal cwd, or the current working directory.
+- Detect a path from `--path`, file-manager script environment variables, GNOME Files/Nautilus accessibility breadcrumbs, Dolphin D-Bus, active terminal cwd, or the current working directory.
 - Copy the raw path or a shell-safe `cd` command.
 - Open the folder in a terminal, Ghostty, or cmux.
 - Launch Codex, Claude, or Hermes in the detected folder.
 - Open SSH sessions in a terminal.
+- Configure the preferred terminal, `cd` quote style, and agent executables from a GTK settings window.
 - Parse Tailscale status for the optional tray menu.
 - Install Nautilus scripts and a Dolphin service menu.
-- Install a branded desktop icon and launcher.
+- Install the same branded icon used by the macOS FinderPath app.
 
 ## Requirements
 
@@ -26,6 +27,7 @@ Optional:
 
 - Clipboard: `wl-clipboard`, `xclip`, or `xsel`
 - Tray UI: `python3-gi` plus `gir1.2-ayatanaappindicator3-0.1` or `gir1.2-appindicator3-0.1`
+- GNOME Files/Nautilus active-folder detection: `python3-pyatspi`
 - Active-window detection: `xdotool` on X11, `hyprctl` on Hyprland, `qdbus` for Dolphin
 - Remote connections: `ssh`
 - Tailscale menu data: `tailscale`
@@ -35,13 +37,13 @@ Optional package examples:
 ```bash
 # Debian / Ubuntu
 sudo apt update
-sudo apt install python3 python3-gi gir1.2-ayatanaappindicator3-0.1 wl-clipboard xclip xdotool qdbus-qt5 openssh-client
+sudo apt install python3 python3-gi python3-pyatspi gir1.2-ayatanaappindicator3-0.1 wl-clipboard xclip xdotool qdbus-qt5 openssh-client
 
 # Fedora
-sudo dnf install python3 python3-gobject libappindicator-gtk3 wl-clipboard xclip xdotool qt5-qttools openssh-clients
+sudo dnf install python3 python3-gobject python3-pyatspi libappindicator-gtk3 wl-clipboard xclip xdotool qt5-qttools openssh-clients
 
 # Arch
-sudo pacman -S python python-gobject libappindicator-gtk3 wl-clipboard xclip xdotool qt5-tools openssh
+sudo pacman -S python python-gobject python-atspi libappindicator-gtk3 wl-clipboard xclip xdotool qt5-tools openssh
 ```
 
 You do not need every optional package. Install the clipboard helper that matches your desktop, the terminal you want to use, and GTK/AppIndicator only if you want the tray app.
@@ -69,6 +71,7 @@ This installs:
 - `~/.local/share/icons/hicolor/512x512/apps/io.github.bhino50.FinderPathLinux.png`
 - Nautilus scripts under `~/.local/share/nautilus/scripts/FinderPath`
 - Dolphin service menu at `~/.local/share/kio/servicemenus/finderpath-linux.desktop`
+- Settings saved at `~/.config/finderpath-linux/config.json`
 
 Make sure `~/.local/bin` is on your `PATH` if you want to run `finderpath-linux` directly.
 
@@ -87,9 +90,17 @@ Start the optional tray app:
 finderpath-linux tray
 ```
 
+Open settings:
+
+```bash
+finderpath-linux settings
+```
+
+Settings are also available from the tray menu, the desktop launcher action, the Nautilus scripts menu, and the Dolphin service menu.
+
 If the tray command says GTK/AppIndicator packages are missing, install the tray dependencies listed above or keep using the CLI/file-manager actions.
 
-The tray app must be started from a graphical desktop session. A plain SSH shell without `DISPLAY` or `WAYLAND_DISPLAY` can still run the CLI and installer tests, but it cannot show the tray.
+The tray and settings windows must be started from a graphical desktop session. A plain SSH shell without `DISPLAY` or `WAYLAND_DISPLAY` can still run the CLI and installer tests, but it cannot show desktop windows.
 
 ## Usage
 
@@ -105,6 +116,7 @@ The tray app must be started from a graphical desktop session. A plain SSH shell
 ./finderpath_linux.py hermes --path ~/Projects
 ./finderpath_linux.py connect myserver
 ./finderpath_linux.py tray
+./finderpath_linux.py settings
 ```
 
 After installation, use `finderpath-linux` instead of `./finderpath_linux.py`:
@@ -113,6 +125,7 @@ After installation, use `finderpath-linux` instead of `./finderpath_linux.py`:
 finderpath-linux open-terminal --path ~/Projects
 finderpath-linux codex --path ~/Projects
 finderpath-linux connect myserver
+finderpath-linux settings
 ```
 
 You can also set a preferred terminal:
@@ -129,9 +142,10 @@ Linux desktops do not expose one shared Finder-like automation API. FinderPath L
 1. Explicit `--path`.
 2. File-manager environment variables from Nautilus, Nemo, and Caja scripts.
 3. `FINDERPATH_PATH`.
-4. Dolphin D-Bus when the active window is Dolphin.
-5. Active-window process cwd through `/proc`.
-6. Current working directory.
+4. GNOME Files/Nautilus accessibility breadcrumbs when `python3-pyatspi` is installed.
+5. Dolphin D-Bus when the active window is Dolphin.
+6. Active-window process cwd through `/proc`.
+7. Current working directory.
 
 For reliable file-manager integration, prefer exact path handoff through `--path`, Nautilus/Nemo/Caja script variables, or Dolphin's `%f` service-menu placeholder.
 
@@ -148,7 +162,8 @@ bash -n uninstall.sh
 
 - Clipboard actions require one of `wl-copy`, `xclip`, or `xsel`.
 - The tray command exits with a clear error if GTK/AppIndicator packages or a graphical display session are missing.
-- The launcher icon is installed from `assets/finderpath-linux-icon.png`.
+- The settings command exits with a clear error if `python3-gi` or a graphical display session is missing.
+- The launcher icon is installed from `assets/finderpath-linux-icon.png`, which matches the macOS FinderPath app icon.
 - SSH rejects hosts that start with `-` to avoid option injection.
 - This repo is Linux-only. The macOS Swift/AppKit app lives in the separate FinderPath macOS repository.
 

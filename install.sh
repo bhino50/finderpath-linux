@@ -44,7 +44,13 @@ Icon=${ICON_NAME}
 Terminal=false
 Categories=Utility;FileTools;
 Keywords=path;folder;terminal;ssh;codex;claude;hermes;
+Actions=Settings;
 StartupNotify=false
+
+[Desktop Action Settings]
+Name=Settings
+Exec=${BIN} settings
+Icon=${ICON_NAME}
 EOF
 
 write_nautilus_script() {
@@ -66,6 +72,7 @@ write_nautilus_script "Open in cmux" open-cmux
 write_nautilus_script "Open with Codex" codex
 write_nautilus_script "Open with Claude" claude
 write_nautilus_script "Open with Hermes" hermes
+write_nautilus_script "Settings" settings
 
 cat > "${KDE_SERVICE_DIR}/finderpath-linux.desktop" <<EOF
 [Desktop Entry]
@@ -73,7 +80,7 @@ Type=Service
 Name=FinderPath Linux
 ServiceTypes=KonqPopupMenu/Plugin
 MimeType=inode/directory;
-Actions=CopyPath;CopyCd;OpenTerminal;OpenGhostty;OpenCmux;OpenCodex;OpenClaude;OpenHermes;
+Actions=CopyPath;CopyCd;OpenTerminal;OpenGhostty;OpenCmux;OpenCodex;OpenClaude;OpenHermes;Settings;
 X-KDE-Priority=TopLevel
 
 [Desktop Action CopyPath]
@@ -115,6 +122,11 @@ Exec=${BIN} claude --path %f
 Name=FinderPath: Open with Hermes
 Icon=${ICON_NAME}
 Exec=${BIN} hermes --path %f
+
+[Desktop Action Settings]
+Name=FinderPath: Settings
+Icon=${ICON_NAME}
+Exec=${BIN} settings
 EOF
 
 if command -v update-desktop-database >/dev/null 2>&1; then
