@@ -159,6 +159,8 @@ echo "Installed Nautilus scripts under: ${NAUTILUS_DIR}"
 echo "Installed Dolphin service menu: ${KDE_SERVICE_DIR}/finderpath-linux.desktop"
 echo
 echo "Optional packages for the full desktop experience:"
+echo "  Settings UI: python3-gi"
 echo "  Tray UI: python3-gi plus gir1.2-ayatanaappindicator3-0.1 or gir1.2-appindicator3-0.1"
 echo "  Clipboard: wl-clipboard, xclip, or xsel"
+echo "  Nautilus current folder detection: python3-pyatspi"
 echo "  Active-window detection: xdotool on X11, hyprctl on Hyprland, qdbus for Dolphin"

@@ -24,3 +24,21 @@ jobs:
           python3 finderpath_linux.py --self-test
           bash -n install.sh
           bash -n uninstall.sh
+
+      - name: Validate desktop installer output
+        run: |
+          if ! command -v desktop-file-validate >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y desktop-file-utils
+          fi
+
+          tmp_home="$(mktemp -d)"
+          HOME="$tmp_home" ./install.sh
+          desktop-file-validate "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.desktop"
+          desktop-file-validate "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.Settings.desktop"
+
+          HOME="$tmp_home" ./uninstall.sh
+          test ! -e "$tmp_home/.local/bin/finderpath-linux"
+          test ! -e "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.desktop"
+          test ! -e "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.Settings.desktop"
+          rm -rf "$tmp_home"

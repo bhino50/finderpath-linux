@@ -264,6 +264,7 @@ def active_nautilus_path() -> PathResult | None:
     except Exception:
         return None
 
+    candidates: list[tuple[int, str]] = []
     for index in range(accessible_child_count(desktop)):
         app = accessible_child(desktop, index)
         if app is None:
@@ -272,11 +273,59 @@ def active_nautilus_path() -> PathResult | None:
         if "nautilus" not in app_name and "files" not in app_name:
             continue
 
-        path = path_from_nautilus_accessible(app)
-        if path:
-            return PathResult(path, "Nautilus accessibility")
+        for node in nautilus_candidate_nodes(app):
+            path = path_from_nautilus_accessible(node)
+            if path:
+                candidates.append((accessible_focus_rank(node, pyatspi), path))
+
+    if candidates:
+        candidates.sort(key=lambda candidate: candidate[0], reverse=True)
+        return PathResult(candidates[0][1], "Nautilus accessibility")
 
     return None
+
+
+def nautilus_candidate_nodes(app: Any) -> list[Any]:
+    children: list[Any] = []
+    for index in range(accessible_child_count(app)):
+        child = accessible_child(app, index)
+        if child is not None:
+            children.append(child)
+
+    return children + [app]
+
+
+def accessible_focus_rank(node: Any, pyatspi: Any) -> int:
+    rank = 0
+    state_weights = (
+        ("STATE_ACTIVE", 80),
+        ("STATE_FOCUSED", 60),
+        ("STATE_SHOWING", 20),
+        ("STATE_VISIBLE", 10),
+    )
+    for state_name, weight in state_weights:
+        state = getattr(pyatspi, state_name, None)
+        if state is not None and accessible_subtree_has_state(node, state):
+            rank += weight
+    return rank
+
+
+def accessible_subtree_has_state(node: Any, state: Any, depth: int = 0) -> bool:
+    try:
+        if node.getState().contains(state):
+            return True
+    except Exception:
+        pass
+
+    if depth >= 3:
+        return False
+
+    for index in range(min(accessible_child_count(node), 40)):
+        child = accessible_child(node, index)
+        if child is not None and accessible_subtree_has_state(child, state, depth + 1):
+            return True
+
+    return False
 
 
 def path_from_nautilus_accessible(root: Any) -> str | None:
