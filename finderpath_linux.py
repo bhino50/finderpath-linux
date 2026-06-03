@@ -682,7 +682,7 @@ class TrayApp:
         self.preferred_terminal = preferred_terminal
         self.indicator = AppIndicator3.Indicator.new(
             APP_ID,
-            "folder",
+            APP_ID,
             AppIndicator3.IndicatorCategory.APPLICATION_STATUS,
         )
         self.indicator.set_status(AppIndicator3.IndicatorStatus.ACTIVE)

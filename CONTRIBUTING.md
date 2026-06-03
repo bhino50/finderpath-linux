@@ -10,6 +10,7 @@ Run these before submitting changes:
 python3 -m py_compile finderpath_linux.py
 python3 finderpath_linux.py --self-test
 bash -n install.sh
+bash -n uninstall.sh
 ```
 
 If you change installer output, test with a temporary home directory:
@@ -18,6 +19,7 @@ If you change installer output, test with a temporary home directory:
 tmp_home="$(mktemp -d)"
 HOME="$tmp_home" ./install.sh
 find "$tmp_home/.local" -maxdepth 5 -type f -print
+test -f "$tmp_home/.local/share/icons/hicolor/512x512/apps/io.github.bhino50.FinderPathLinux.png"
 rm -rf "$tmp_home"
 ```
 
@@ -40,4 +42,3 @@ Test exact path detection first:
 ```
 
 Then test the integration that changed: Nautilus scripts, Dolphin service menu, tray menu, terminal launchers, or Tailscale parsing.
-

@@ -13,6 +13,7 @@ The app is dependency-light by design. CLI and file-manager actions use only Pyt
 - Open SSH sessions in a terminal.
 - Parse Tailscale status for the optional tray menu.
 - Install Nautilus scripts and a Dolphin service menu.
+- Install a branded desktop icon and launcher.
 
 ## Requirements
 
@@ -29,9 +30,33 @@ Optional:
 - Remote connections: `ssh`
 - Tailscale menu data: `tailscale`
 
+Optional package examples:
+
+```bash
+# Debian / Ubuntu
+sudo apt update
+sudo apt install python3 python3-gi gir1.2-ayatanaappindicator3-0.1 wl-clipboard xclip xdotool qdbus-qt5 openssh-client
+
+# Fedora
+sudo dnf install python3 python3-gobject libappindicator-gtk3 wl-clipboard xclip xdotool qt5-qttools openssh-clients
+
+# Arch
+sudo pacman -S python python-gobject libappindicator-gtk3 wl-clipboard xclip xdotool qt5-tools openssh
+```
+
+You do not need every optional package. Install the clipboard helper that matches your desktop, the terminal you want to use, and GTK/AppIndicator only if you want the tray app.
+
 ## Install
 
-From the repo root:
+Clone and install:
+
+```bash
+git clone https://github.com/bhino50/finderpath-linux.git
+cd finderpath-linux
+./install.sh
+```
+
+Or, from an existing checkout:
 
 ```bash
 ./install.sh
@@ -41,10 +66,28 @@ This installs:
 
 - `~/.local/bin/finderpath-linux`
 - `~/.local/share/applications/io.github.bhino50.FinderPathLinux.desktop`
+- `~/.local/share/icons/hicolor/512x512/apps/io.github.bhino50.FinderPathLinux.png`
 - Nautilus scripts under `~/.local/share/nautilus/scripts/FinderPath`
 - Dolphin service menu at `~/.local/share/kio/servicemenus/finderpath-linux.desktop`
 
 Make sure `~/.local/bin` is on your `PATH` if you want to run `finderpath-linux` directly.
+
+After installing, log out and back in if your file manager does not immediately show the new scripts/service menu. Some desktops cache menu and icon state.
+
+Verify the command:
+
+```bash
+finderpath-linux path --path "$PWD" --source
+finderpath-linux copy-cd --path "$PWD"
+```
+
+Start the optional tray app:
+
+```bash
+finderpath-linux tray
+```
+
+If the tray command says GTK/AppIndicator packages are missing, install the tray dependencies listed above or keep using the CLI/file-manager actions.
 
 ## Usage
 
@@ -60,6 +103,14 @@ Make sure `~/.local/bin` is on your `PATH` if you want to run `finderpath-linux`
 ./finderpath_linux.py hermes --path ~/Projects
 ./finderpath_linux.py connect myserver
 ./finderpath_linux.py tray
+```
+
+After installation, use `finderpath-linux` instead of `./finderpath_linux.py`:
+
+```bash
+finderpath-linux open-terminal --path ~/Projects
+finderpath-linux codex --path ~/Projects
+finderpath-linux connect myserver
 ```
 
 You can also set a preferred terminal:
@@ -88,16 +139,25 @@ For reliable file-manager integration, prefer exact path handoff through `--path
 python3 -m py_compile finderpath_linux.py
 python3 finderpath_linux.py --self-test
 bash -n install.sh
+bash -n uninstall.sh
 ```
 
 ## Notes
 
 - Clipboard actions require one of `wl-copy`, `xclip`, or `xsel`.
 - The tray command exits with a clear error if GTK/AppIndicator packages are missing.
+- The launcher icon is installed from `assets/finderpath-linux-icon.png`.
 - SSH rejects hosts that start with `-` to avoid option injection.
 - This repo is Linux-only. The macOS Swift/AppKit app lives in the separate FinderPath macOS repository.
+
+## Uninstall
+
+```bash
+./uninstall.sh
+```
+
+This removes the user-level executable, desktop launcher, icon, Nautilus scripts, and Dolphin service menu.
 
 ## License
 
 MIT. See [LICENSE](LICENSE).
-
