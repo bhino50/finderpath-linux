@@ -29,6 +29,7 @@ KDE_SERVICE_DIR="${HOME}/.local/share/kio/servicemenus"
 BIN="${BIN_DIR}/finderpath-linux"
 ICON_NAME="${APP_ID}"
 ICON_PATH="${ICON_DIR}/${ICON_NAME}.png"
+SETTINGS_APP_ID="${APP_ID}.Settings"
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$ICON_DIR" "$NAUTILUS_DIR" "$KDE_SERVICE_DIR"
 install -m 755 "$SOURCE" "$BIN"
@@ -51,6 +52,19 @@ StartupNotify=false
 Name=Settings
 Exec=${BIN} settings
 Icon=${ICON_NAME}
+EOF
+
+cat > "${APP_DIR}/${SETTINGS_APP_ID}.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=FinderPath Linux Settings
+Comment=Configure FinderPath Linux
+Exec=${BIN} settings
+Icon=${ICON_NAME}
+Terminal=false
+Categories=Utility;FileTools;
+Keywords=path;folder;terminal;ssh;codex;claude;hermes;settings;preferences;
+StartupNotify=false
 EOF
 
 write_nautilus_script() {
@@ -140,6 +154,7 @@ fi
 echo "Installed ${BIN}"
 echo "Installed icon: ${ICON_PATH}"
 echo "Installed desktop launcher: ${APP_DIR}/${APP_ID}.desktop"
+echo "Installed settings launcher: ${APP_DIR}/${SETTINGS_APP_ID}.desktop"
 echo "Installed Nautilus scripts under: ${NAUTILUS_DIR}"
 echo "Installed Dolphin service menu: ${KDE_SERVICE_DIR}/finderpath-linux.desktop"
 echo

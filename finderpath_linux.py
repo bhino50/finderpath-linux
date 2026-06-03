@@ -1010,7 +1010,7 @@ class TrayApp:
             ) from error
 
         gi.require_version("Gtk", "3.0")
-        from gi.repository import Gtk  # type: ignore
+        from gi.repository import GLib, Gtk  # type: ignore
 
         try:
             gi.require_version("AyatanaAppIndicator3", "0.1")
@@ -1020,9 +1020,11 @@ class TrayApp:
             from gi.repository import AppIndicator3  # type: ignore
 
         self.Gtk = Gtk
+        self.GLib = GLib
         self.AppIndicator3 = AppIndicator3
         self.terminal_override = preferred_terminal
         self.config = load_config()
+        self.refresh_source_id: int | None = None
         self.indicator = AppIndicator3.Indicator.new(
             APP_ID,
             APP_ID,
@@ -1032,10 +1034,11 @@ class TrayApp:
 
     def run(self) -> int:
         self.rebuild_menu()
+        self.refresh_source_id = self.GLib.timeout_add_seconds(2, self.rebuild_menu)
         self.Gtk.main()
         return 0
 
-    def rebuild_menu(self) -> None:
+    def rebuild_menu(self) -> bool:
         Gtk = self.Gtk
         self.config = load_config()
         menu = Gtk.Menu()
@@ -1050,13 +1053,27 @@ class TrayApp:
         menu.append(Gtk.SeparatorMenuItem())
 
         self.append_item(menu, "Refresh", self.rebuild_menu)
-        self.append_item(menu, "Copy Path", lambda: self.copy_path(path_result.path))
-        self.append_item(menu, "Copy cd Command", lambda: self.copy_cd(path_result.path))
+        self.append_item(menu, "Copy Path", self.copy_path)
+        self.append_item(menu, "Copy cd Command", self.copy_cd)
         menu.append(Gtk.SeparatorMenuItem())
 
-        self.append_item(menu, "Open in Terminal", lambda: self.run_action(open_terminal_at(path_result.path, self.terminal_override)))
-        self.append_item(menu, "Open in Ghostty", lambda: self.run_action(open_ghostty_at(path_result.path)), executable="ghostty")
-        self.append_item(menu, "Open in cmux", lambda: self.run_action(open_cmux_at(path_result.path)), executable="cmux")
+        self.append_item(
+            menu,
+            "Open in Terminal",
+            lambda: self.run_action(open_terminal_at(current_path().path, self.terminal_override)),
+        )
+        self.append_item(
+            menu,
+            "Open in Ghostty",
+            lambda: self.run_action(open_ghostty_at(current_path().path)),
+            executable="ghostty",
+        )
+        self.append_item(
+            menu,
+            "Open in cmux",
+            lambda: self.run_action(open_cmux_at(current_path().path)),
+            executable="cmux",
+        )
         menu.append(Gtk.SeparatorMenuItem())
 
         for agent in DEFAULT_AGENTS:
@@ -1066,7 +1083,7 @@ class TrayApp:
                 menu,
                 label,
                 lambda agent=agent, executable=executable: self.run_action(
-                    open_agent(agent, executable, path_result.path, self.terminal_override)
+                    open_agent(agent, executable, current_path().path, self.terminal_override)
                 ),
                 executable=executable,
             )
@@ -1079,6 +1096,7 @@ class TrayApp:
 
         menu.show_all()
         self.indicator.set_menu(menu)
+        return True
 
     def append_item(
         self,
@@ -1122,13 +1140,15 @@ class TrayApp:
         submenu_root.set_submenu(submenu)
         menu.append(submenu_root)
 
-    def copy_path(self, path: str) -> None:
+    def copy_path(self) -> None:
+        path = current_path().path
         error = copy_to_clipboard(path)
         self.run_action(error)
         if not error:
             notify(APP_NAME, "Copied path")
 
-    def copy_cd(self, path: str) -> None:
+    def copy_cd(self) -> None:
+        path = current_path().path
         error = copy_to_clipboard(cd_command(path, self.config["cd_quote_style"]))
         self.run_action(error)
         if not error:

@@ -10,6 +10,7 @@ APP_ID="io.github.bhino50.FinderPathLinux"
 
 rm -f "${HOME}/.local/bin/finderpath-linux"
 rm -f "${HOME}/.local/share/applications/${APP_ID}.desktop"
+rm -f "${HOME}/.local/share/applications/${APP_ID}.Settings.desktop"
 rm -f "${HOME}/.local/share/icons/hicolor/512x512/apps/${APP_ID}.png"
 rm -rf "${HOME}/.local/share/nautilus/scripts/FinderPath"
 rm -f "${HOME}/.local/share/kio/servicemenus/finderpath-linux.desktop"

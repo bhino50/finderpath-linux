@@ -12,6 +12,7 @@ The app is dependency-light by design. CLI and file-manager actions use only Pyt
 - Launch Codex, Claude, or Hermes in the detected folder.
 - Open SSH sessions in a terminal.
 - Configure the preferred terminal, `cd` quote style, and agent executables from a GTK settings window.
+- Resolve the current open folder when tray actions are clicked, so folder changes do not require restarting the tray.
 - Parse Tailscale status for the optional tray menu.
 - Install Nautilus scripts and a Dolphin service menu.
 - Install the same branded icon used by the macOS FinderPath app.
@@ -68,6 +69,7 @@ This installs:
 
 - `~/.local/bin/finderpath-linux`
 - `~/.local/share/applications/io.github.bhino50.FinderPathLinux.desktop`
+- `~/.local/share/applications/io.github.bhino50.FinderPathLinux.Settings.desktop`
 - `~/.local/share/icons/hicolor/512x512/apps/io.github.bhino50.FinderPathLinux.png`
 - Nautilus scripts under `~/.local/share/nautilus/scripts/FinderPath`
 - Dolphin service menu at `~/.local/share/kio/servicemenus/finderpath-linux.desktop`
@@ -96,7 +98,7 @@ Open settings:
 finderpath-linux settings
 ```
 
-Settings are also available from the tray menu, the desktop launcher action, the Nautilus scripts menu, and the Dolphin service menu.
+Settings are also available from the tray menu, the standalone "FinderPath Linux Settings" app launcher, the desktop launcher action, the Nautilus scripts menu, and the Dolphin service menu.
 
 If the tray command says GTK/AppIndicator packages are missing, install the tray dependencies listed above or keep using the CLI/file-manager actions.
 
@@ -149,6 +151,8 @@ Linux desktops do not expose one shared Finder-like automation API. FinderPath L
 
 For reliable file-manager integration, prefer exact path handoff through `--path`, Nautilus/Nemo/Caja script variables, or Dolphin's `%f` service-menu placeholder.
 
+The tray header refreshes while the tray is running, and tray actions resolve the current open folder when clicked.
+
 ## Validate
 
 ```bash
@@ -173,7 +177,7 @@ bash -n uninstall.sh
 ./uninstall.sh
 ```
 
-This removes the user-level executable, desktop launcher, icon, Nautilus scripts, and Dolphin service menu.
+This removes the user-level executable, desktop launchers, icon, Nautilus scripts, and Dolphin service menu.
 
 ## License
 
