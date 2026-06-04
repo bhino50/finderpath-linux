@@ -24,6 +24,8 @@ Required:
 - Linux
 - Python 3.10+
 
+The installer can bootstrap the supported desktop packages on Debian/Ubuntu, Fedora, Arch, and openSUSE when run with `--yes` or when you accept the prompt.
+
 Optional:
 
 - Clipboard: `wl-clipboard`, `xclip`, or `xsel`
@@ -47,22 +49,33 @@ sudo dnf install python3 python3-gobject python3-pyatspi libappindicator-gtk3 wl
 sudo pacman -S python python-gobject python-atspi libappindicator-gtk3 wl-clipboard xclip xdotool qt5-tools openssh
 ```
 
-You do not need every optional package. Install the clipboard helper that matches your desktop, the terminal you want to use, and GTK/AppIndicator only if you want the tray app.
+You do not need every optional package for CLI-only use. For a plug-and-play desktop install, let `install.sh` install the recommended packages.
 
 ## Install
 
-Clone and install:
+Recommended download install:
+
+```bash
+curl -fL -o finderpath-linux-installer.sh \
+  https://github.com/bhino50/finderpath-linux/releases/latest/download/finderpath-linux-installer.sh
+chmod +x finderpath-linux-installer.sh
+./finderpath-linux-installer.sh --yes
+```
+
+The one-file installer unpacks the app, installs the user-level launchers, and bootstraps supported desktop dependencies. Omit `--yes` if you want to review the dependency prompt. Use `--skip-deps` for a CLI-only install or when you manage packages yourself.
+
+Source checkout install:
 
 ```bash
 git clone https://github.com/bhino50/finderpath-linux.git
 cd finderpath-linux
-./install.sh
+./install.sh --yes
 ```
 
 Or, from an existing checkout:
 
 ```bash
-./install.sh
+./install.sh --yes
 ```
 
 This installs:
@@ -79,9 +92,10 @@ Make sure `~/.local/bin` is on your `PATH` if you want to run `finderpath-linux`
 
 After installing, log out and back in if your file manager does not immediately show the new scripts/service menu. Some desktops cache menu and icon state.
 
-Verify the command:
+Verify the install:
 
 ```bash
+finderpath-linux doctor
 finderpath-linux path --path "$PWD" --source
 finderpath-linux copy-cd --path "$PWD"
 ```
@@ -158,8 +172,11 @@ The tray header refreshes while the tray is running, and tray actions resolve th
 ```bash
 python3 -m py_compile finderpath_linux.py
 python3 finderpath_linux.py --self-test
+python3 finderpath_linux.py doctor
 bash -n install.sh
 bash -n uninstall.sh
+bash -n scripts/package_release.sh
+./scripts/package_release.sh
 ```
 
 ## Notes

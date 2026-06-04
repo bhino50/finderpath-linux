@@ -1,6 +1,46 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+usage() {
+  cat <<'EOF'
+Usage: ./install.sh [options]
+
+Options:
+  -y, --yes       Install supported system dependencies without prompting.
+  --install-deps  Install supported system dependencies when missing.
+  --skip-deps     Do not try to install system dependencies.
+  -h, --help      Show this help.
+EOF
+}
+
+ASSUME_YES=0
+INSTALL_DEPS_MODE="prompt"
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -y|--yes)
+      ASSUME_YES=1
+      INSTALL_DEPS_MODE="yes"
+      ;;
+    --install-deps)
+      INSTALL_DEPS_MODE="yes"
+      ;;
+    --skip-deps)
+      INSTALL_DEPS_MODE="skip"
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "Unknown option: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+  shift
+done
+
 if [[ "$(uname -s)" != "Linux" ]]; then
   echo "FinderPath Linux installer must be run on Linux." >&2
   exit 1
@@ -30,6 +70,187 @@ BIN="${BIN_DIR}/finderpath-linux"
 ICON_NAME="${APP_ID}"
 ICON_PATH="${ICON_DIR}/${ICON_NAME}.png"
 SETTINGS_APP_ID="${APP_ID}.Settings"
+
+command_exists() {
+  command -v "$1" >/dev/null 2>&1
+}
+
+sudo_cmd() {
+  if [[ "${EUID}" -eq 0 ]]; then
+    "$@"
+    return
+  fi
+
+  if command_exists sudo; then
+    sudo "$@"
+    return
+  fi
+
+  echo "sudo is not available. Install dependencies manually, then rerun ./install.sh --skip-deps." >&2
+  return 1
+}
+
+python_import_works() {
+  local script="$1"
+  command_exists python3 && python3 - <<PY >/dev/null 2>&1
+$script
+PY
+}
+
+have_gtk() {
+  python_import_works 'import gi
+gi.require_version("Gtk", "3.0")
+from gi.repository import Gtk'
+}
+
+have_appindicator() {
+  python_import_works 'import gi
+for namespace in ("AyatanaAppIndicator3", "AppIndicator3"):
+    try:
+        gi.require_version(namespace, "0.1")
+        __import__("gi.repository", fromlist=[namespace])
+        raise SystemExit(0)
+    except Exception:
+        pass
+raise SystemExit(1)'
+}
+
+have_clipboard_helper() {
+  command_exists wl-copy || command_exists xclip || command_exists xsel
+}
+
+have_terminal_launcher() {
+  local candidate
+  for candidate in ghostty x-terminal-emulator kgx gnome-terminal konsole xfce4-terminal mate-terminal tilix alacritty kitty wezterm xterm; do
+    if command_exists "$candidate"; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+needs_dependency_bootstrap() {
+  command_exists python3 || return 0
+  have_gtk || return 0
+  have_appindicator || return 0
+  have_clipboard_helper || return 0
+  have_terminal_launcher || return 0
+  return 1
+}
+
+print_missing_dependency_summary() {
+  echo "Checking FinderPath Linux desktop dependencies..."
+  command_exists python3 || echo "  missing: python3"
+  have_gtk || echo "  missing: GTK Python bindings for settings"
+  have_appindicator || echo "  missing: AppIndicator gir package for tray"
+  have_clipboard_helper || echo "  missing: wl-copy, xclip, or xsel clipboard helper"
+  have_terminal_launcher || echo "  missing: a known terminal launcher"
+}
+
+install_packages_one_by_one() {
+  local manager="$1"
+  shift
+  local package
+  for package in "$@"; do
+    case "$manager" in
+      apt)
+        sudo_cmd apt-get install -y "$package" || true
+        ;;
+      dnf)
+        sudo_cmd dnf install -y "$package" || true
+        ;;
+      pacman)
+        sudo_cmd pacman -S --needed --noconfirm "$package" || true
+        ;;
+      zypper)
+        sudo_cmd zypper --non-interactive install "$package" || true
+        ;;
+    esac
+  done
+}
+
+install_supported_dependencies() {
+  if command_exists apt-get; then
+    sudo_cmd apt-get update
+    sudo_cmd apt-get install -y python3
+    install_packages_one_by_one apt \
+      python3-gi python3-pyatspi gir1.2-ayatanaappindicator3-0.1 gir1.2-appindicator3-0.1 \
+      wl-clipboard xclip xsel xdotool xterm qdbus-qt5 openssh-client desktop-file-utils \
+      hicolor-icon-theme libglib2.0-bin libnotify-bin
+    return 0
+  fi
+
+  if command_exists dnf; then
+    sudo_cmd dnf install -y python3
+    install_packages_one_by_one dnf \
+      python3-gobject python3-pyatspi libayatana-appindicator-gtk3 libappindicator-gtk3 \
+      wl-clipboard xclip xsel xdotool xterm qt5-qttools openssh-clients desktop-file-utils \
+      hicolor-icon-theme gtk3 libnotify
+    return 0
+  fi
+
+  if command_exists pacman; then
+    sudo_cmd pacman -Sy --needed --noconfirm python
+    install_packages_one_by_one pacman \
+      python-gobject python-atspi libayatana-appindicator libappindicator-gtk3 \
+      wl-clipboard xclip xsel xdotool xterm qt5-tools openssh desktop-file-utils \
+      hicolor-icon-theme gtk3 libnotify
+    return 0
+  fi
+
+  if command_exists zypper; then
+    sudo_cmd zypper --non-interactive install python3
+    install_packages_one_by_one zypper \
+      python3-gobject python3-pyatspi typelib-1_0-AyatanaAppIndicator3-0_1 \
+      wl-clipboard xclip xsel xdotool xterm libqt5-qttools openssh-clients desktop-file-utils \
+      hicolor-icon-theme gtk3-tools libnotify-tools
+    return 0
+  fi
+
+  echo "No supported package manager found. Install the dependencies listed in README.md, then rerun ./install.sh --skip-deps." >&2
+  return 1
+}
+
+confirm_dependency_install() {
+  if [[ "$INSTALL_DEPS_MODE" == "yes" || "$ASSUME_YES" -eq 1 ]]; then
+    return 0
+  fi
+
+  if [[ ! -t 0 ]]; then
+    echo "Run ./install.sh --yes to bootstrap dependencies non-interactively, or ./install.sh --skip-deps for CLI-only install."
+    return 1
+  fi
+
+  local reply
+  read -r -p "Install supported desktop dependencies now? [Y/n] " reply
+  case "${reply}" in
+    n|N|no|NO|No)
+      return 1
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+}
+
+maybe_install_dependencies() {
+  if [[ "$INSTALL_DEPS_MODE" == "skip" ]]; then
+    return
+  fi
+
+  if ! needs_dependency_bootstrap; then
+    return
+  fi
+
+  print_missing_dependency_summary
+  if confirm_dependency_install; then
+    install_supported_dependencies
+  else
+    echo "Skipping dependency bootstrap. CLI actions still work when Python 3 is installed; tray/settings may need manual packages."
+  fi
+}
+
+maybe_install_dependencies
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$ICON_DIR" "$NAUTILUS_DIR" "$KDE_SERVICE_DIR"
 install -m 755 "$SOURCE" "$BIN"
@@ -158,9 +379,20 @@ echo "Installed settings launcher: ${APP_DIR}/${SETTINGS_APP_ID}.desktop"
 echo "Installed Nautilus scripts under: ${NAUTILUS_DIR}"
 echo "Installed Dolphin service menu: ${KDE_SERVICE_DIR}/finderpath-linux.desktop"
 echo
-echo "Optional packages for the full desktop experience:"
-echo "  Settings UI: python3-gi"
-echo "  Tray UI: python3-gi plus gir1.2-ayatanaappindicator3-0.1 or gir1.2-appindicator3-0.1"
-echo "  Clipboard: wl-clipboard, xclip, or xsel"
-echo "  Nautilus current folder detection: python3-pyatspi"
-echo "  Active-window detection: xdotool on X11, hyprctl on Hyprland, qdbus for Dolphin"
+if [[ ":${PATH}:" != *":${BIN_DIR}:"* ]]; then
+  echo "Note: ${BIN_DIR} is not on PATH in this shell."
+  echo "Desktop launchers are installed. For terminal use now, run:"
+  echo "  export PATH=\"${BIN_DIR}:\$PATH\""
+  echo
+fi
+
+if command_exists python3; then
+  "${BIN}" --self-test
+  echo
+  "${BIN}" doctor || true
+fi
+
+echo
+echo "Start FinderPath Linux from your app launcher, or run:"
+echo "  ${BIN} tray"
+echo "  ${BIN} settings"

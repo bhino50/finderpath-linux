@@ -22,8 +22,10 @@ jobs:
         run: |
           python3 -m py_compile finderpath_linux.py
           python3 finderpath_linux.py --self-test
+          python3 finderpath_linux.py doctor
           bash -n install.sh
           bash -n uninstall.sh
+          bash -n scripts/package_release.sh
 
       - name: Validate desktop installer output
         run: |
@@ -33,7 +35,7 @@ jobs:
           fi
 
           tmp_home="$(mktemp -d)"
-          HOME="$tmp_home" ./install.sh
+          HOME="$tmp_home" ./install.sh --skip-deps
           desktop-file-validate "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.desktop"
           desktop-file-validate "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.Settings.desktop"
 
@@ -41,4 +43,16 @@ jobs:
           test ! -e "$tmp_home/.local/bin/finderpath-linux"
           test ! -e "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.desktop"
           test ! -e "$tmp_home/.local/share/applications/io.github.bhino50.FinderPathLinux.Settings.desktop"
+          rm -rf "$tmp_home"
+
+      - name: Validate release installer
+        run: |
+          VERSION=ci ./scripts/package_release.sh
+          test -s dist/finderpath-linux-ci.tar.gz
+          test -x dist/finderpath-linux-installer.sh
+
+          tmp_home="$(mktemp -d)"
+          HOME="$tmp_home" ./dist/finderpath-linux-installer.sh --skip-deps
+          "$tmp_home/.local/bin/finderpath-linux" --self-test
+          "$tmp_home/.local/bin/finderpath-linux" doctor
           rm -rf "$tmp_home"

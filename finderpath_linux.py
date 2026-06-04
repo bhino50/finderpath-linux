@@ -10,6 +10,7 @@ packages are installed.
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 import os
 import re
@@ -73,6 +74,13 @@ class TailscaleStatus:
 
 
 TAILSCALE_UNAVAILABLE = TailscaleStatus("unavailable", None, ())
+
+
+@dataclass(frozen=True)
+class DoctorCheck:
+    status: str
+    name: str
+    detail: str
 
 
 def load_config() -> dict[str, str]:
@@ -1222,6 +1230,132 @@ def has_graphical_display(env: Mapping[str, str] | None = None) -> bool:
     return bool(current_env.get("DISPLAY") or current_env.get("WAYLAND_DISPLAY"))
 
 
+def module_available(name: str) -> bool:
+    return importlib.util.find_spec(name) is not None
+
+
+def gtk_import_detail() -> str | None:
+    try:
+        import gi  # type: ignore
+
+        gi.require_version("Gtk", "3.0")
+        from gi.repository import Gtk  # type: ignore  # noqa: F401
+    except Exception as error:
+        return str(error)
+
+    return None
+
+
+def appindicator_import_detail() -> str | None:
+    try:
+        import gi  # type: ignore
+    except Exception as error:
+        return str(error)
+
+    errors: list[str] = []
+    for namespace in ("AyatanaAppIndicator3", "AppIndicator3"):
+        try:
+            gi.require_version(namespace, "0.1")
+            __import__("gi.repository", fromlist=[namespace])
+            return None
+        except Exception as error:
+            errors.append(f"{namespace}: {error}")
+
+    return "; ".join(errors)
+
+
+def available_commands(candidates: Sequence[str]) -> list[str]:
+    return [candidate for candidate in candidates if shutil.which(candidate)]
+
+
+def path_contains(directory: Path) -> bool:
+    paths = os.environ.get("PATH", "").split(os.pathsep)
+    return str(directory) in paths
+
+
+def doctor_checks() -> list[DoctorCheck]:
+    checks: list[DoctorCheck] = []
+
+    if sys.platform.startswith("linux"):
+        checks.append(DoctorCheck("OK", "Linux runtime", sys.platform))
+    else:
+        checks.append(DoctorCheck("FAIL", "Linux runtime", f"expected Linux, got {sys.platform}"))
+
+    version = ".".join(str(part) for part in sys.version_info[:3])
+    if sys.version_info >= (3, 10):
+        checks.append(DoctorCheck("OK", "Python", version))
+    else:
+        checks.append(DoctorCheck("FAIL", "Python", f"{version}; Python 3.10+ is required"))
+
+    local_bin = Path.home() / ".local" / "bin"
+    if path_contains(local_bin):
+        checks.append(DoctorCheck("OK", "Command PATH", f"{local_bin} is on PATH"))
+    else:
+        checks.append(DoctorCheck("WARN", "Command PATH", f"{local_bin} is not on PATH in this shell"))
+
+    if has_graphical_display():
+        checks.append(DoctorCheck("OK", "Desktop session", "DISPLAY or WAYLAND_DISPLAY is set"))
+    else:
+        checks.append(DoctorCheck("WARN", "Desktop session", "tray and settings need DISPLAY or WAYLAND_DISPLAY"))
+
+    gtk_error = gtk_import_detail()
+    if gtk_error is None:
+        checks.append(DoctorCheck("OK", "GTK settings UI", "python3-gi and GTK 3 import correctly"))
+    else:
+        checks.append(DoctorCheck("WARN", "GTK settings UI", gtk_error))
+
+    indicator_error = appindicator_import_detail()
+    if indicator_error is None:
+        checks.append(DoctorCheck("OK", "Tray indicator", "AppIndicator import works"))
+    else:
+        checks.append(DoctorCheck("WARN", "Tray indicator", indicator_error))
+
+    clipboard = available_commands(("wl-copy", "xclip", "xsel"))
+    if clipboard:
+        checks.append(DoctorCheck("OK", "Clipboard helper", ", ".join(clipboard)))
+    else:
+        checks.append(DoctorCheck("WARN", "Clipboard helper", "install wl-clipboard, xclip, or xsel"))
+
+    terminal = terminal_executable()
+    if terminal:
+        checks.append(DoctorCheck("OK", "Terminal launcher", terminal))
+    else:
+        checks.append(DoctorCheck("WARN", "Terminal launcher", "install Ghostty, GNOME Terminal, Konsole, xterm, or set FINDERPATH_TERMINAL"))
+
+    active_window_helpers = available_commands(("xdotool", "hyprctl", "qdbus"))
+    if active_window_helpers:
+        checks.append(DoctorCheck("OK", "Active-window helpers", ", ".join(active_window_helpers)))
+    else:
+        checks.append(DoctorCheck("WARN", "Active-window helpers", "install xdotool, hyprctl, or qdbus for stronger auto-detection"))
+
+    if module_available("pyatspi"):
+        checks.append(DoctorCheck("OK", "Nautilus path detection", "python3-pyatspi import works"))
+    else:
+        checks.append(DoctorCheck("WARN", "Nautilus path detection", "install python3-pyatspi for GNOME Files breadcrumbs"))
+
+    if shutil.which("ssh"):
+        checks.append(DoctorCheck("OK", "SSH", "ssh is available"))
+    else:
+        checks.append(DoctorCheck("WARN", "SSH", "install openssh-client for Connect actions"))
+
+    return checks
+
+
+def action_doctor(args: argparse.Namespace) -> int:
+    checks = doctor_checks()
+    for check in checks:
+        print(f"{check.status:4} {check.name}: {check.detail}")
+
+    failures = [check for check in checks if check.status == "FAIL"]
+    warnings = [check for check in checks if check.status == "WARN"]
+    if failures or (args.strict and warnings):
+        print()
+        print("Re-run install.sh with --yes to bootstrap supported desktop dependencies, or use --skip-deps for CLI-only installs.")
+        return 1
+
+    return 0
+
+
 def run_self_test() -> int:
     assert parse_file_uri("file:///tmp/hello%20there") == "/tmp/hello there"
     assert parse_file_uri("https://example.com/nope") is None
@@ -1305,6 +1439,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("settings", help="Open the GTK settings window.")
 
+    doctor_parser = subparsers.add_parser("doctor", help="Check installed desktop dependencies.")
+    doctor_parser.add_argument("--strict", action="store_true", help="Return nonzero when optional desktop helpers are missing.")
+
     return parser
 
 
@@ -1352,6 +1489,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return action_tray(args)
     if command == "settings":
         return action_settings(args)
+    if command == "doctor":
+        return action_doctor(args)
 
     parser.error(f"unknown command: {command}")
     return 2
