@@ -1,0 +1,126 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish, for example v0.1.0"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build release assets
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref }}
+
+      - name: Resolve release version
+        id: release
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            tag="${{ inputs.tag }}"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+)*([-+][0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must look like v0.1.0, got: $tag" >&2
+            exit 1
+          fi
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Validate
+        run: |
+          python3 -m py_compile finderpath_linux.py
+          python3 finderpath_linux.py --self-test
+          python3 finderpath_linux.py doctor
+          bash -n install.sh
+          bash -n uninstall.sh
+          bash -n scripts/package_release.sh
+
+      - name: Build package assets
+        run: VERSION="${{ steps.release.outputs.version }}" ./scripts/package_release.sh
+
+      - name: Validate release checksums
+        run: |
+          test -s dist/finderpath-linux-${{ steps.release.outputs.version }}.tar.gz
+          test -x dist/finderpath-linux-installer.sh
+          test -x dist/finderpath-linux-${{ steps.release.outputs.version }}-installer.sh
+          test -s dist/SHA256SUMS
+          (cd dist && sha256sum -c SHA256SUMS)
+
+      - name: Validate installer asset
+        run: |
+          tmp_home="$(mktemp -d)"
+          HOME="$tmp_home" ./dist/finderpath-linux-installer.sh --skip-deps
+          "$tmp_home/.local/bin/finderpath-linux" --self-test
+          "$tmp_home/.local/bin/finderpath-linux" doctor
+          rm -rf "$tmp_home"
+
+      - name: Validate no-sudo installer fallback
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" ubuntu:22.04 bash -lc '
+            set -euo pipefail
+            apt-get update >/dev/null
+            apt-get install -y python3 >/dev/null
+            useradd -m tester
+            su -s /bin/bash tester -c "
+              set -euo pipefail
+              /repo/dist/finderpath-linux-installer.sh --yes > /tmp/finderpath-install.log
+              grep -q \"Cannot install system packages automatically\" /tmp/finderpath-install.log
+              test -x \"\$HOME/.local/bin/finderpath-linux\"
+              \"\$HOME/.local/bin/finderpath-linux\" --self-test
+            "
+          '
+
+      - name: Prepare release notes
+        run: |
+          cat > dist/release-notes.md <<EOF
+          FinderPath Linux ${{ steps.release.outputs.tag }}
+
+          Install with:
+
+              curl -fL -o finderpath-linux-installer.sh https://github.com/bhino50/finderpath-linux/releases/latest/download/finderpath-linux-installer.sh
+              chmod +x finderpath-linux-installer.sh
+              ./finderpath-linux-installer.sh --yes
+
+          Assets:
+          - finderpath-linux-installer.sh: stable latest installer URL
+          - finderpath-linux-${{ steps.release.outputs.version }}-installer.sh: version-pinned installer
+          - finderpath-linux-${{ steps.release.outputs.version }}.tar.gz: source bundle
+          - SHA256SUMS: checksum file for the release assets
+          EOF
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.release.outputs.tag }}
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          assets=(
+            "dist/finderpath-linux-installer.sh"
+            "dist/finderpath-linux-${VERSION}-installer.sh"
+            "dist/finderpath-linux-${VERSION}.tar.gz"
+            "dist/SHA256SUMS"
+          )
+
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${assets[@]}" --clobber
+          else
+            gh release create "$TAG" "${assets[@]}" \
+              --title "FinderPath Linux ${TAG}" \
+              --notes-file dist/release-notes.md
+          fi

@@ -90,6 +90,30 @@ sudo_cmd() {
   return 1
 }
 
+# Returns success only when we can actually install system packages:
+# running as root, or sudo can escalate without a password, or sudo can
+# prompt on an interactive terminal. This lets us skip the dependency
+# bootstrap gracefully instead of aborting when escalation is impossible.
+privilege_escalation_available() {
+  if [[ "${EUID}" -eq 0 ]]; then
+    return 0
+  fi
+
+  if ! command_exists sudo; then
+    return 1
+  fi
+
+  if sudo -n true >/dev/null 2>&1; then
+    return 0
+  fi
+
+  if [[ -t 0 ]]; then
+    return 0
+  fi
+
+  return 1
+}
+
 python_import_works() {
   local script="$1"
   command_exists python3 && python3 - <<PY >/dev/null 2>&1
@@ -171,8 +195,8 @@ install_packages_one_by_one() {
 
 install_supported_dependencies() {
   if command_exists apt-get; then
-    sudo_cmd apt-get update
-    sudo_cmd apt-get install -y python3
+    sudo_cmd apt-get update || true
+    sudo_cmd apt-get install -y python3 || true
     install_packages_one_by_one apt \
       python3-gi python3-pyatspi gir1.2-ayatanaappindicator3-0.1 gir1.2-appindicator3-0.1 \
       wl-clipboard xclip xsel xdotool xterm qdbus-qt5 openssh-client desktop-file-utils \
@@ -181,7 +205,7 @@ install_supported_dependencies() {
   fi
 
   if command_exists dnf; then
-    sudo_cmd dnf install -y python3
+    sudo_cmd dnf install -y python3 || true
     install_packages_one_by_one dnf \
       python3-gobject python3-pyatspi libayatana-appindicator-gtk3 libappindicator-gtk3 \
       wl-clipboard xclip xsel xdotool xterm qt5-qttools openssh-clients desktop-file-utils \
@@ -190,7 +214,7 @@ install_supported_dependencies() {
   fi
 
   if command_exists pacman; then
-    sudo_cmd pacman -Sy --needed --noconfirm python
+    sudo_cmd pacman -Sy --needed --noconfirm python || true
     install_packages_one_by_one pacman \
       python-gobject python-atspi libayatana-appindicator libappindicator-gtk3 \
       wl-clipboard xclip xsel xdotool xterm qt5-tools openssh desktop-file-utils \
@@ -199,7 +223,7 @@ install_supported_dependencies() {
   fi
 
   if command_exists zypper; then
-    sudo_cmd zypper --non-interactive install python3
+    sudo_cmd zypper --non-interactive install python3 || true
     install_packages_one_by_one zypper \
       python3-gobject python3-pyatspi typelib-1_0-AyatanaAppIndicator3-0_1 \
       wl-clipboard xclip xsel xdotool xterm libqt5-qttools openssh-clients desktop-file-utils \
@@ -235,22 +259,40 @@ confirm_dependency_install() {
 
 maybe_install_dependencies() {
   if [[ "$INSTALL_DEPS_MODE" == "skip" ]]; then
-    return
+    return 0
   fi
 
   if ! needs_dependency_bootstrap; then
-    return
+    return 0
   fi
 
   print_missing_dependency_summary
+
+  # Never let an inability to install system packages abort the core
+  # install. If we cannot escalate privileges, skip the bootstrap with
+  # actionable guidance and fall through to the CLI + desktop install.
+  if ! privilege_escalation_available; then
+    echo "Cannot install system packages automatically (need root or sudo)."
+    echo "Continuing with the CLI-only install. To add tray/settings packages later:"
+    echo "  - install the packages listed in README.md manually, then rerun ./install.sh --skip-deps, or"
+    echo "  - rerun this installer as root or with passwordless sudo: ./install.sh --yes"
+    return 0
+  fi
+
   if confirm_dependency_install; then
-    install_supported_dependencies
+    install_supported_dependencies || \
+      echo "Some desktop dependencies could not be installed; continuing with the CLI install."
   else
     echo "Skipping dependency bootstrap. CLI actions still work when Python 3 is installed; tray/settings may need manual packages."
   fi
+
+  return 0
 }
 
-maybe_install_dependencies
+# Bootstrap is best-effort: a dependency failure must never block the
+# binary + desktop integration that follow.
+maybe_install_dependencies || \
+  echo "Dependency bootstrap incomplete; continuing with the core install." >&2
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$ICON_DIR" "$NAUTILUS_DIR" "$KDE_SERVICE_DIR"
 install -m 755 "$SOURCE" "$BIN"

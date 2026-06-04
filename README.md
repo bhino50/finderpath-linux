@@ -53,7 +53,7 @@ You do not need every optional package for CLI-only use. For a plug-and-play des
 
 ## Install
 
-Recommended download install:
+Recommended release install:
 
 ```bash
 curl -fL -o finderpath-linux-installer.sh \
@@ -63,6 +63,14 @@ chmod +x finderpath-linux-installer.sh
 ```
 
 The one-file installer unpacks the app, installs the user-level launchers, and bootstraps supported desktop dependencies. Omit `--yes` if you want to review the dependency prompt. Use `--skip-deps` for a CLI-only install or when you manage packages yourself.
+
+Release downloads also include a version-pinned installer, a tarball, and `SHA256SUMS` checksums. For example:
+
+```bash
+curl -fL -O https://github.com/bhino50/finderpath-linux/releases/latest/download/finderpath-linux-installer.sh
+curl -fL -O https://github.com/bhino50/finderpath-linux/releases/latest/download/SHA256SUMS
+sha256sum -c SHA256SUMS --ignore-missing
+```
 
 Source checkout install:
 
@@ -177,6 +185,35 @@ bash -n install.sh
 bash -n uninstall.sh
 bash -n scripts/package_release.sh
 ./scripts/package_release.sh
+```
+
+## Publish a Release
+
+Releases are built by `.github/workflows/release.yml` from version tags.
+
+1. Make sure `main` has the installer and docs changes you want to ship.
+2. Create and push a version tag:
+
+   ```bash
+   VERSION=0.1.1
+   git tag "v${VERSION}"
+   git push origin "v${VERSION}"
+   ```
+
+3. The Release workflow validates the app, builds the installer assets, tests the self-extracting installer, and publishes a GitHub release.
+
+Each release contains:
+
+- `finderpath-linux-installer.sh`: stable installer name used by the latest-download URL.
+- `finderpath-linux-<version>-installer.sh`: version-pinned installer.
+- `finderpath-linux-<version>.tar.gz`: source bundle for manual inspection or offline install.
+- `SHA256SUMS`: checksums for the installer and tarball assets.
+
+You can also build the same assets locally:
+
+```bash
+VERSION=0.1.1 ./scripts/package_release.sh
+ls -lh dist/
 ```
 
 ## Notes

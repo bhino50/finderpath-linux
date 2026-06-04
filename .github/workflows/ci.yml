@@ -50,9 +50,28 @@ jobs:
           VERSION=ci ./scripts/package_release.sh
           test -s dist/finderpath-linux-ci.tar.gz
           test -x dist/finderpath-linux-installer.sh
+          test -x dist/finderpath-linux-ci-installer.sh
+          test -s dist/SHA256SUMS
+          (cd dist && sha256sum -c SHA256SUMS)
 
           tmp_home="$(mktemp -d)"
           HOME="$tmp_home" ./dist/finderpath-linux-installer.sh --skip-deps
           "$tmp_home/.local/bin/finderpath-linux" --self-test
           "$tmp_home/.local/bin/finderpath-linux" doctor
           rm -rf "$tmp_home"
+
+      - name: Validate no-sudo installer fallback
+        run: |
+          docker run --rm -v "$PWD:/repo:ro" ubuntu:22.04 bash -lc '
+            set -euo pipefail
+            apt-get update >/dev/null
+            apt-get install -y python3 >/dev/null
+            useradd -m tester
+            su -s /bin/bash tester -c "
+              set -euo pipefail
+              /repo/dist/finderpath-linux-installer.sh --yes > /tmp/finderpath-install.log
+              grep -q \"Cannot install system packages automatically\" /tmp/finderpath-install.log
+              test -x \"\$HOME/.local/bin/finderpath-linux\"
+              \"\$HOME/.local/bin/finderpath-linux\" --self-test
+            "
+          '

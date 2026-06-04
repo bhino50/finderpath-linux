@@ -9,8 +9,10 @@ PACKAGE_NAME="finderpath-linux-${VERSION}"
 PACKAGE_DIR="${DIST_DIR}/${PACKAGE_NAME}"
 TARBALL="${DIST_DIR}/${PACKAGE_NAME}.tar.gz"
 INSTALLER="${DIST_DIR}/finderpath-linux-installer.sh"
+VERSIONED_INSTALLER="${DIST_DIR}/${PACKAGE_NAME}-installer.sh"
+CHECKSUMS="${DIST_DIR}/SHA256SUMS"
 
-rm -rf "$PACKAGE_DIR"
+rm -rf "$PACKAGE_DIR" "$TARBALL" "$INSTALLER" "$VERSIONED_INSTALLER" "$CHECKSUMS"
 mkdir -p "$PACKAGE_DIR/assets" "$DIST_DIR"
 
 install -m 755 "${ROOT_DIR}/finderpath_linux.py" "${PACKAGE_DIR}/finderpath_linux.py"
@@ -21,7 +23,24 @@ install -m 644 "${ROOT_DIR}/CONTRIBUTING.md" "${PACKAGE_DIR}/CONTRIBUTING.md"
 install -m 644 "${ROOT_DIR}/LICENSE" "${PACKAGE_DIR}/LICENSE"
 install -m 644 "${ROOT_DIR}/assets/finderpath-linux-icon.png" "${PACKAGE_DIR}/assets/finderpath-linux-icon.png"
 
-tar -C "$DIST_DIR" -czf "$TARBALL" "$PACKAGE_NAME"
+# Strip macOS extended attributes (e.g. com.apple.provenance) so GNU tar on
+# Linux does not emit "Ignoring unknown extended header keyword 'LIBARCHIVE.xattr...'"
+# warnings every time a downloader extracts the bundle.
+if command -v xattr >/dev/null 2>&1; then
+  xattr -cr "$PACKAGE_DIR" >/dev/null 2>&1 || true
+fi
+
+# Use word-split string (not an array) so this stays safe under `set -u` on the
+# bash 3.2 that ships with macOS, where an empty "${arr[@]}" is an unbound error.
+TAR_FLAGS=""
+if tar --no-mac-metadata --version >/dev/null 2>&1; then
+  TAR_FLAGS="$TAR_FLAGS --no-mac-metadata"
+fi
+if tar --no-xattrs --version >/dev/null 2>&1; then
+  TAR_FLAGS="$TAR_FLAGS --no-xattrs"
+fi
+
+COPYFILE_DISABLE=1 tar $TAR_FLAGS -C "$DIST_DIR" -czf "$TARBALL" "$PACKAGE_NAME"
 
 cat > "$INSTALLER" <<'HEADER'
 #!/usr/bin/env bash
@@ -54,6 +73,25 @@ HEADER
 base64 < "$TARBALL" >> "$INSTALLER"
 printf '\n' >> "$INSTALLER"
 chmod +x "$INSTALLER"
+cp "$INSTALLER" "$VERSIONED_INSTALLER"
+
+sha256_file() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1"
+    return
+  fi
+
+  shasum -a 256 "$1"
+}
+
+(
+  cd "$DIST_DIR"
+  sha256_file "$(basename "$TARBALL")"
+  sha256_file "$(basename "$INSTALLER")"
+  sha256_file "$(basename "$VERSIONED_INSTALLER")"
+) > "$CHECKSUMS"
 
 echo "Created ${TARBALL}"
 echo "Created ${INSTALLER}"
+echo "Created ${VERSIONED_INSTALLER}"
+echo "Created ${CHECKSUMS}"
