@@ -30,7 +30,7 @@ Optional:
 
 - Clipboard: `wl-clipboard`, `xclip`, or `xsel`
 - Tray UI: `python3-gi` plus `gir1.2-ayatanaappindicator3-0.1` or `gir1.2-appindicator3-0.1`
-- GNOME Files/Nautilus active-folder detection: `python3-pyatspi`
+- GNOME Files/Nautilus active-folder detection: `python3-pyatspi` (the installer also turns on the GNOME `toolkit-accessibility` setting it depends on)
 - Active-window detection: `xdotool` on X11, `hyprctl` on Hyprland, `qdbus` for Dolphin
 - Remote connections: `ssh`
 - Tailscale menu data: `tailscale`
@@ -174,6 +174,8 @@ Linux desktops do not expose one shared Finder-like automation API. FinderPath L
 For reliable file-manager integration, prefer exact path handoff through `--path`, Nautilus/Nemo/Caja script variables, or Dolphin's `%f` service-menu placeholder.
 
 The tray header refreshes while the tray is running, and tray actions resolve the current open folder when clicked.
+
+GNOME exposes the Nautilus breadcrumb used by step 4 only when the `org.gnome.desktop.interface toolkit-accessibility` setting is on. The installer, `finderpath-linux doctor --fix`, and the tray enable it automatically. After it is first turned on, restart GNOME Files (`nautilus -q`) or log out and back in so already-open windows pick it up; otherwise detection falls back to your home folder.
 
 ## Validate
 

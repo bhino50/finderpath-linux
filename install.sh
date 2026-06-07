@@ -431,7 +431,7 @@ fi
 if command_exists python3; then
   "${BIN}" --self-test
   echo
-  "${BIN}" doctor || true
+  "${BIN}" doctor --fix || true
 fi
 
 echo

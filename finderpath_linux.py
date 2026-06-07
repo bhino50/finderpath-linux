@@ -42,6 +42,11 @@ DEFAULT_CONFIG = {
     "hermes_executable": "hermes",
 }
 
+# GNOME exposes file-manager breadcrumbs to AT-SPI only when this is enabled.
+# It defaults to false, so FinderPath turns it on for Nautilus path detection.
+ACCESSIBILITY_SCHEMA = "org.gnome.desktop.interface"
+ACCESSIBILITY_KEY = "toolkit-accessibility"
+
 
 @dataclass(frozen=True)
 class PathResult:
@@ -1218,6 +1223,7 @@ class TrayApp:
 
 
 def action_tray(args: argparse.Namespace) -> int:
+    ensure_accessibility_for_detection()
     try:
         return TrayApp(args.terminal).run()
     except RuntimeError as error:
@@ -1266,6 +1272,53 @@ def appindicator_import_detail() -> str | None:
 
 def available_commands(candidates: Sequence[str]) -> list[str]:
     return [candidate for candidate in candidates if shutil.which(candidate)]
+
+
+def accessibility_state() -> bool | None:
+    """Whether GTK accessibility (AT-SPI) is enabled on this GNOME session.
+
+    Returns True/False when the setting is readable, or None when it does not
+    apply here (gsettings missing, or the schema/key is absent on this desktop).
+    """
+    if not shutil.which("gsettings"):
+        return None
+    output = run_text(["gsettings", "get", ACCESSIBILITY_SCHEMA, ACCESSIBILITY_KEY])
+    if output is None:
+        return None
+    return output.strip() == "true"
+
+
+def enable_accessibility() -> bool | None:
+    """Best-effort enable of AT-SPI so GNOME Files exposes its breadcrumb.
+
+    Returns the resulting state: True if enabled, False if it could not be
+    changed, or None when the setting does not apply on this desktop.
+    """
+    state = accessibility_state()
+    if state is None or state:
+        return state
+    try:
+        subprocess.run(
+            ["gsettings", "set", ACCESSIBILITY_SCHEMA, ACCESSIBILITY_KEY, "true"],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+    return accessibility_state()
+
+
+def ensure_accessibility_for_detection() -> None:
+    """Enable AT-SPI when launching the tray so detection works out of the box."""
+    if accessibility_state() is False and enable_accessibility():
+        print(
+            "FinderPath enabled GTK accessibility (toolkit-accessibility) for path "
+            "detection. Restart GNOME Files (nautilus -q) or re-log in if the current "
+            "folder is not detected yet.",
+            file=sys.stderr,
+        )
 
 
 def path_contains(directory: Path) -> bool:
@@ -1333,6 +1386,14 @@ def doctor_checks() -> list[DoctorCheck]:
     else:
         checks.append(DoctorCheck("WARN", "Nautilus path detection", "install python3-pyatspi for GNOME Files breadcrumbs"))
 
+    accessibility = accessibility_state()
+    if accessibility is None:
+        checks.append(DoctorCheck("OK", "GTK accessibility (AT-SPI)", "not required on this desktop"))
+    elif accessibility:
+        checks.append(DoctorCheck("OK", "GTK accessibility (AT-SPI)", "toolkit-accessibility is enabled"))
+    else:
+        checks.append(DoctorCheck("WARN", "GTK accessibility (AT-SPI)", "run 'finderpath-linux doctor --fix' so GNOME Files exposes its breadcrumb"))
+
     if shutil.which("ssh"):
         checks.append(DoctorCheck("OK", "SSH", "ssh is available"))
     else:
@@ -1342,6 +1403,15 @@ def doctor_checks() -> list[DoctorCheck]:
 
 
 def action_doctor(args: argparse.Namespace) -> int:
+    if getattr(args, "fix", False) and accessibility_state() is False:
+        if enable_accessibility():
+            print("Enabled GTK accessibility (toolkit-accessibility).")
+            print("Restart GNOME Files (nautilus -q) or re-log in for path detection to take effect.")
+        else:
+            print("Could not enable toolkit-accessibility automatically. Set it manually with:")
+            print(f"  gsettings set {ACCESSIBILITY_SCHEMA} {ACCESSIBILITY_KEY} true")
+        print()
+
     checks = doctor_checks()
     for check in checks:
         print(f"{check.status:4} {check.name}: {check.detail}")
@@ -1373,6 +1443,7 @@ def run_self_test() -> int:
     assert has_graphical_display({"DISPLAY": ":0"})
     assert has_graphical_display({"WAYLAND_DISPLAY": "wayland-0"})
     assert not has_graphical_display({})
+    assert accessibility_state() in (True, False, None)
 
     with tempfile.TemporaryDirectory() as tmp:
         folder = Path(tmp)
@@ -1441,6 +1512,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor_parser = subparsers.add_parser("doctor", help="Check installed desktop dependencies.")
     doctor_parser.add_argument("--strict", action="store_true", help="Return nonzero when optional desktop helpers are missing.")
+    doctor_parser.add_argument("--fix", action="store_true", help="Enable GTK accessibility (toolkit-accessibility) when it is off.")
 
     return parser
 
