@@ -97,6 +97,10 @@ jobs:
               chmod +x finderpath-linux-installer.sh
               ./finderpath-linux-installer.sh --yes
 
+          What changed:
+          - The installer now runs finderpath-linux doctor --fix so GNOME Files/Nautilus path detection can use AT-SPI out of the box.
+          - The tray and doctor commands can enable GNOME toolkit-accessibility when it is off, with restart guidance for already-open Nautilus windows.
+
           Assets:
           - finderpath-linux-installer.sh: stable latest installer URL
           - finderpath-linux-${{ steps.release.outputs.version }}-installer.sh: version-pinned installer

@@ -197,7 +197,7 @@ Releases are built by `.github/workflows/release.yml` from version tags.
 2. Create and push a version tag:
 
    ```bash
-   VERSION=0.1.1
+   VERSION=0.1.2
    git tag "v${VERSION}"
    git push origin "v${VERSION}"
    ```
@@ -214,7 +214,7 @@ Each release contains:
 You can also build the same assets locally:
 
 ```bash
-VERSION=0.1.1 ./scripts/package_release.sh
+VERSION=0.1.2 ./scripts/package_release.sh
 ls -lh dist/
 ```
 
